@@ -1,0 +1,43 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-eventuser}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-eventpass}
+      POSTGRES_DB: ${POSTGRES_DB:-eventdb}
+    volumes:
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-eventuser} -d ${POSTGRES_DB:-eventdb}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  generator:
+    build: ./generator
+    environment:
+      POSTGRES_HOST: db
+      POSTGRES_USER: ${POSTGRES_USER:-eventuser}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-eventpass}
+      POSTGRES_DB: ${POSTGRES_DB:-eventdb}
+      EVENT_COUNT: ${EVENT_COUNT:-1000}
+    depends_on:
+      db:
+        condition: service_healthy
+
+  visualizer:
+    build: ./visualizer
+    environment:
+      POSTGRES_HOST: db
+      POSTGRES_USER: ${POSTGRES_USER:-eventuser}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-eventpass}
+      POSTGRES_DB: ${POSTGRES_DB:-eventdb}
+    volumes:
+      - ./output:/output
+    depends_on:
+      generator:
+        condition: service_completed_successfully
+
+volumes:
+  pg_data:
