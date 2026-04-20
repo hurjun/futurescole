@@ -16,6 +16,7 @@ services:
 
   generator:
     build: ./generator
+    restart: "no"
     environment:
       POSTGRES_HOST: db
       POSTGRES_USER: ${POSTGRES_USER:-eventuser}
@@ -28,6 +29,7 @@ services:
 
   visualizer:
     build: ./visualizer
+    restart: "no"
     environment:
       POSTGRES_HOST: db
       POSTGRES_USER: ${POSTGRES_USER:-eventuser}
