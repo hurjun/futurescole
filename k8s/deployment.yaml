@@ -1,0 +1,41 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: event-generator
+  labels:
+    app: event-generator
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: event-generator
+  template:
+    metadata:
+      labels:
+        app: event-generator
+    spec:
+      containers:
+        - name: generator
+          image: event-generator:latest
+          imagePullPolicy: IfNotPresent
+
+          # Inject non-sensitive config from ConfigMap.
+          envFrom:
+            - configMapRef:
+                name: generator-config
+
+          # Inject DB password from a Secret (must be created separately).
+          env:
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: generator-secret
+                  key: POSTGRES_PASSWORD
+
+          resources:
+            requests:
+              cpu: "100m"      # 0.1 core — enough for a batch insert workload
+              memory: "128Mi"
+            limits:
+              cpu: "500m"      # cap at 0.5 core to prevent noisy-neighbour issues
+              memory: "256Mi"

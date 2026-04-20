@@ -96,6 +96,30 @@ DB 비밀번호를 코드에 하드코딩하지 않고 환경변수로 주입합
 
 ---
 
+## Kubernetes (Optional A)
+
+generator 앱을 위한 쿠버네티스 매니페스트입니다. 실제 배포용이 아닌 구조 설계 목적으로 작성했습니다.
+
+```bash
+# Secret 먼저 생성 (실제 배포 시)
+kubectl create secret generic generator-secret \
+  --from-literal=POSTGRES_PASSWORD=your_password
+
+# ConfigMap + Deployment 적용
+kubectl apply -f k8s/configmap.yaml
+kubectl apply -f k8s/deployment.yaml
+```
+
+**왜 Pod이 아닌 Deployment인가?**
+
+단독 Pod은 노드 장애나 OOM으로 죽으면 영구히 사라집니다. Deployment는 `replicas: 2`를 항상 유지하도록 ReplicaSet을 관리하므로, Pod이 죽어도 자동으로 재시작되고 롤링 업데이트(무중단 배포)도 지원합니다.
+
+**왜 환경변수를 하드코딩하지 않고 ConfigMap인가?**
+
+DB 접속 정보를 이미지에 하드코딩하면 dev/staging/prod 환경마다 이미지를 새로 빌드해야 합니다. ConfigMap으로 분리하면 이미지는 그대로 두고 환경별 값만 교체할 수 있습니다. 단, 비밀번호처럼 민감한 값은 ConfigMap이 아닌 Secret에 저장해야 합니다 (ConfigMap은 평문 저장).
+
+---
+
 ## 프로젝트 구조
 
 ```
@@ -113,5 +137,8 @@ DB 비밀번호를 코드에 하드코딩하지 않고 환경변수로 주입합
 ├── analysis/
 │   └── queries.sql       # 분석 쿼리 4종
 ├── output/               # PNG 출력 디렉터리 (volume mount)
+├── k8s/
+│   ├── deployment.yaml   # generator Deployment (replicas=2, resource limits)
+│   └── configmap.yaml    # DB 접속 환경변수
 └── docker-compose.yml
 ```
