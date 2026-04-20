@@ -1,0 +1,106 @@
+<mxfile host="app.diagrams.net" modified="2026-04-21T00:00:00.000Z" agent="Claude" version="21.0.0">
+  <diagram name="AWS Event Pipeline Architecture" id="aws-event-pipeline">
+    <mxGraphModel dx="1422" dy="762" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1654" pageHeight="1169" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <!-- ── Title ── -->
+        <mxCell id="title" value="AWS Event Pipeline Architecture" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=20;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="427" y="30" width="800" height="40" as="geometry" />
+        </mxCell>
+
+        <!-- ── Lane backgrounds ── -->
+        <mxCell id="lane-ingestion" value="Ingestion" style="swimlane;startSize=30;fillColor=#dae8fc;strokeColor=#6c8ebf;fontStyle=1;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="40" y="100" width="1560" height="180" as="geometry" />
+        </mxCell>
+        <mxCell id="lane-storage" value="Storage" style="swimlane;startSize=30;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="40" y="300" width="1560" height="180" as="geometry" />
+        </mxCell>
+        <mxCell id="lane-viz" value="Visualization" style="swimlane;startSize=30;fillColor=#fff2cc;strokeColor=#d6b656;fontStyle=1;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="40" y="500" width="1560" height="160" as="geometry" />
+        </mxCell>
+
+        <!-- ── Ingestion layer ── -->
+        <!-- Client -->
+        <mxCell id="client" value="Client&#xa;(Web / Mobile)" style="shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.general;labelBackgroundColor=none;sketch=0;fontStyle=1;fillColor=#FF9900;strokeColor=#ffffff;" vertex="1" parent="lane-ingestion">
+          <mxGeometry x="60" y="65" width="78" height="78" as="geometry" />
+        </mxCell>
+
+        <!-- API Gateway -->
+        <mxCell id="apigw" value="API Gateway&#xa;REST API" style="shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.api_gateway;labelBackgroundColor=none;sketch=0;fontStyle=1;fillColor=#E7157B;strokeColor=#ffffff;" vertex="1" parent="lane-ingestion">
+          <mxGeometry x="260" y="65" width="78" height="78" as="geometry" />
+        </mxCell>
+
+        <!-- Lambda Validator -->
+        <mxCell id="lambda-in" value="Lambda&#xa;Validator" style="shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.lambda;labelBackgroundColor=none;sketch=0;fontStyle=1;fillColor=#ED7100;strokeColor=#ffffff;" vertex="1" parent="lane-ingestion">
+          <mxGeometry x="460" y="65" width="78" height="78" as="geometry" />
+        </mxCell>
+
+        <!-- Kinesis Data Streams -->
+        <mxCell id="kinesis" value="Kinesis&#xa;Data Streams" style="shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.kinesis_data_streams;labelBackgroundColor=none;sketch=0;fontStyle=1;fillColor=#8C4FFF;strokeColor=#ffffff;" vertex="1" parent="lane-ingestion">
+          <mxGeometry x="680" y="65" width="78" height="78" as="geometry" />
+        </mxCell>
+
+        <!-- Lambda Consumer -->
+        <mxCell id="lambda-consumer" value="Lambda&#xa;Consumer" style="shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.lambda;labelBackgroundColor=none;sketch=0;fontStyle=1;fillColor=#ED7100;strokeColor=#ffffff;" vertex="1" parent="lane-ingestion">
+          <mxGeometry x="900" y="65" width="78" height="78" as="geometry" />
+        </mxCell>
+
+        <!-- Kinesis Firehose -->
+        <mxCell id="firehose" value="Kinesis&#xa;Firehose" style="shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.kinesis_firehose;labelBackgroundColor=none;sketch=0;fontStyle=1;fillColor=#8C4FFF;strokeColor=#ffffff;" vertex="1" parent="lane-ingestion">
+          <mxGeometry x="900" y="65" width="78" height="78" as="geometry" />
+        </mxCell>
+
+        <!-- ── Storage layer ── -->
+        <!-- Aurora PostgreSQL -->
+        <mxCell id="aurora" value="Aurora PostgreSQL&#xa;(Serverless v2)" style="shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.aurora;labelBackgroundColor=none;sketch=0;fontStyle=1;fillColor=#C7131F;strokeColor=#ffffff;" vertex="1" parent="lane-storage">
+          <mxGeometry x="460" y="60" width="78" height="78" as="geometry" />
+        </mxCell>
+
+        <!-- S3 raw -->
+        <mxCell id="s3-raw" value="S3&#xa;Raw Events" style="shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.s3;labelBackgroundColor=none;sketch=0;fontStyle=1;fillColor=#3F8624;strokeColor=#ffffff;" vertex="1" parent="lane-storage">
+          <mxGeometry x="900" y="60" width="78" height="78" as="geometry" />
+        </mxCell>
+
+        <!-- ── Visualization layer ── -->
+        <!-- QuickSight -->
+        <mxCell id="quicksight" value="QuickSight&#xa;Dashboard" style="shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.quicksight;labelBackgroundColor=none;sketch=0;fontStyle=1;fillColor=#8C4FFF;strokeColor=#ffffff;" vertex="1" parent="lane-viz">
+          <mxGeometry x="460" y="50" width="78" height="78" as="geometry" />
+        </mxCell>
+
+        <!-- CloudWatch -->
+        <mxCell id="cloudwatch" value="CloudWatch&#xa;Alarms" style="shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.cloudwatch;labelBackgroundColor=none;sketch=0;fontStyle=1;fillColor=#E7157B;strokeColor=#ffffff;" vertex="1" parent="lane-viz">
+          <mxGeometry x="700" y="50" width="78" height="78" as="geometry" />
+        </mxCell>
+
+        <!-- ── Arrows ── -->
+        <mxCell id="e1" value="POST /events" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" source="client" target="apigw" parent="lane-ingestion">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e2" value="invoke" style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="apigw" target="lambda-in" parent="lane-ingestion">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e3" value="put record" style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="lambda-in" target="kinesis" parent="lane-ingestion">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e4" value="trigger" style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="kinesis" target="lambda-consumer" parent="lane-ingestion">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e5" value="INSERT" style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="lambda-consumer" target="aurora" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e6" value="raw backup" style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="kinesis" target="s3-raw" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e7" value="query" style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="quicksight" target="aurora" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e8" value="metrics" style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="lambda-consumer" target="cloudwatch" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
