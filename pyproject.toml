@@ -1,0 +1,23 @@
+[project]
+name = "event-pipeline"
+version = "0.1.0"
+description = "Containerized event-data generation and analytics pipeline"
+requires-python = ">=3.12"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+# pycodestyle (E), pyflakes (F), isort (I), pyupgrade (UP), flake8-bugbear (B).
+select = ["E", "F", "I", "UP", "B"]
+# Internal helpers are deliberately accessed by tests via their underscore names.
+ignore = []
+
+[tool.ruff.lint.per-file-ignores]
+# Tests reach into private generator helpers on purpose.
+"tests/*" = ["E501"]

@@ -1,0 +1,7 @@
+# Development / CI dependencies for linting and the test suite.
+# Runtime service deps live in generator/requirements.txt and visualizer/requirements.txt.
+# The tests are hermetic: they exercise generation logic and SQLite-backed
+# analytics, so no database driver (psycopg2) or plotting stack is required here.
+faker==24.4.0
+pytest==8.3.4
+ruff==0.8.6

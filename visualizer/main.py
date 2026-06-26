@@ -6,10 +6,12 @@ import time
 from typing import Any
 
 import matplotlib
-matplotlib.use("Agg")  # headless rendering — no display required
-import matplotlib.pyplot as plt
 import psycopg2
 import psycopg2.extensions
+
+matplotlib.use("Agg")  # select headless backend before importing pyplot
+
+import matplotlib.pyplot as plt  # noqa: E402  (must follow matplotlib.use)
 
 logging.basicConfig(
     level=logging.INFO,
