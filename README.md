@@ -1,13 +1,51 @@
 # Event Pipeline
 
-Docker Compose 기반의 이벤트 데이터 생성 및 시각화 파이프라인입니다.
+[![CI](https://github.com/hurjun/futurescole/actions/workflows/ci.yml/badge.svg)](https://github.com/hurjun/futurescole/actions/workflows/ci.yml)
+
+A containerized data pipeline that **simulates realistic web-service event traffic**,
+stores it in **PostgreSQL**, and renders **analytics charts** — orchestrated end-to-end
+with Docker Compose. The repository also ships Kubernetes manifests and an AWS reference
+architecture as design exercises.
+
+The goal of the project is to model a high-volume, schema-varied telemetry stream the way
+a real e-commerce backend produces one (session funnels, conversion/error rates, peak-hour
+bias, repeat visitors) and to back the design choices with a deliberate schema, reproducible
+generation, and an automated test suite.
 
 ---
 
-## 실행 방법
+## Architecture
 
-**Prerequisites**
-- Docker Desktop 설치 및 실행 중
+```mermaid
+flowchart LR
+    subgraph compose["Docker Compose"]
+        direction LR
+        G["generator<br/>(Python + Faker)<br/>session-based event synthesis"]
+        DB[("PostgreSQL 16<br/>events table<br/>structured cols + JSONB")]
+        V["visualizer<br/>(Python + matplotlib)<br/>aggregation queries"]
+    end
+    G -- "bulk INSERT" --> DB
+    DB -- "GROUP BY / aggregate" --> V
+    V -- "PNG charts" --> OUT["./output<br/>(mounted volume)"]
+
+    DB -. "healthcheck" .- G
+    G == "runs to exit 0, then" ==> V
+```
+
+The three services run as a **batch pipeline**, not long-running daemons:
+
+1. `db` starts PostgreSQL and is gated by a healthcheck.
+2. `generator` waits for the DB to be healthy, synthesizes `EVENT_COUNT` events, bulk-inserts
+   them, and exits `0`.
+3. `visualizer` waits for the generator to *complete successfully*
+   (`depends_on: condition: service_completed_successfully`), runs the analytics queries,
+   writes two PNG charts to the mounted `./output` volume, and exits.
+
+---
+
+## Quick Start
+
+**Prerequisites:** Docker Desktop (or any Docker Engine with Compose v2) running.
 
 ```bash
 git clone https://github.com/hurjun/futurescole.git
@@ -15,197 +53,270 @@ cd futurescole
 docker compose up --build
 ```
 
-파이프라인이 완료되면 `./output/` 폴더에 PNG 파일 2개가 생성됩니다.
+When the pipeline finishes, two charts appear in `./output/`:
 
-| 파일 | 설명 |
-|------|------|
-| `event_type_distribution.png` | 이벤트 타입별 건수 막대 차트 |
-| `hourly_trend.png` | 시간대별 이벤트 추이 라인 차트 |
+| File | Description |
+|------|-------------|
+| `event_type_distribution.png` | Bar chart — event count by type |
+| `hourly_trend.png` | Line chart — event volume per hour |
 
-이벤트 수를 조정하려면:
+Useful overrides:
 
 ```bash
+# Generate a larger dataset
 EVENT_COUNT=5000 docker compose up --build
+
+# Deterministic, fully reproducible dataset (see "Reproducibility")
+SEED=42 EVENT_COUNT=5000 docker compose up --build
+
+# Override the (non-production) demo credentials
+POSTGRES_USER=me POSTGRES_PASSWORD=secret POSTGRES_DB=events docker compose up --build
 ```
 
 ---
 
-## 이벤트 설계
+## Results
 
-### 이벤트 타입
+The numbers below were measured from a deterministic run (`SEED=42`, `EVENT_COUNT=5000`).
+Because the random stream is seeded, the **event counts and rates are fully reproducible**;
+only the absolute timestamps shift with the wall clock. They confirm the generator hits its
+design targets (~20% session conversion, ~10% session error, ~80% peak-hour traffic).
 
-| 타입 | 설명 | 주요 properties |
-|------|------|----------------|
-| `page_view` | 사용자가 페이지를 방문 | `page_path`, `referrer`, `duration_ms` |
-| `purchase` | 결제 완료 | `item_id`, `amount_krw`, `payment_method` |
-| `error` | 서버/클라이언트 에러 발생 | `error_code`, `message`, `stack_trace_hash` |
+| Metric | Value |
+|--------|-------|
+| Total events | 5,003 |
+| Sessions | 1,513 |
+| Distinct users | 50 (fixed pool) |
+| `page_view` events | 4,584 (91.6%) |
+| `purchase` events | 286 (5.7%) |
+| `error` events | 133 (2.7%) |
+| Session conversion rate | 18.9% (target ~20%) |
+| Session error rate | 8.8% (target ~10%) |
+| Peak-hour share (00–09 UTC = 09–18 KST) | 80.5% (theoretical ~81%) |
 
-### 설계 근거
-
-**왜 이 3가지 이벤트인가?**
-
-실제 e-commerce 서비스의 핵심 지표를 커버하도록 선정했습니다.
-- `page_view`는 트래픽의 대부분을 차지하며 UX 분석의 기반이 됩니다.
-- `purchase`는 서비스의 핵심 비즈니스 지표(전환율)를 측정합니다.
-- `error`는 서비스 안정성 모니터링에 필수적입니다.
-
-**세션 기반 시뮬레이션**
-
-단순 랜덤 생성 대신 **세션 단위**로 이벤트를 생성했습니다. 실제 사용자는 `page_view → page_view → purchase` 같은 자연스러운 퍼널을 따르기 때문입니다.
-
-- 한 세션은 반드시 1–5개의 `page_view`로 시작 (브라우징)
-- 20% 확률로 `purchase` 발생 (전환)
-- 10% 확률로 `error` 발생 (장애)
-- 세션 내 이벤트는 수 초 간격으로 타임스탬프가 증가
-
-이를 통해 생성된 데이터가 실제 서비스 데이터와 유사한 통계적 분포를 갖습니다.
-
-**피크타임 반영**
-
-한국 서비스 기준 비즈니스 아워(09:00–18:00 KST)에 트래픽 70%를 집중시켜, 실제 서비스의 시간대별 패턴을 재현했습니다.
-
-**50명 유저 풀 재사용**
-
-50개의 UUID를 고정 풀로 만들어 반복 사용합니다. 완전 랜덤 UUID를 쓰면 모든 유저가 단 1번만 방문하는 비현실적인 데이터가 됩니다. 유저 풀을 고정하면 재방문, Top 유저 집계 등 의미있는 분석이 가능합니다.
+> Per-*event* purchase/error shares are low (~6% / ~3%) because each converting session
+> contains many `page_view` events; the **per-session** conversion/error rates are the
+> design targets and land at ~19% / ~9%.
 
 ---
 
-## 스키마 설명
+## Event Model & Simulation Design
 
-**저장소로 PostgreSQL을 선택한 이유**
+Three event types cover the core signals of an e-commerce service:
 
-이벤트 타입별 집계, 유저별 통계, 시간대별 추이 등 구조화된 분석 쿼리가 필요하기 때문에 관계형 DB를 선택했습니다. SQLite는 Docker 환경에서 볼륨 동기화 문제가 있고 동시 쓰기에 취약하며, NoSQL(MongoDB 등)은 집계 쿼리가 복잡해집니다. PostgreSQL은 JSONB 타입으로 유연한 스키마도 지원하면서 SQL 집계 성능도 우수합니다.
+| Type | Meaning | Key `properties` |
+|------|---------|------------------|
+| `page_view` | A user views a page (the bulk of traffic / UX signal) | `page_path`, `referrer`, `duration_ms` |
+| `purchase` | A completed checkout (the conversion / business metric) | `item_id`, `amount_krw`, `payment_method` |
+| `error` | A server/client error (the reliability metric) | `error_code`, `message`, `stack_trace_hash` |
 
-`events` 테이블은 이벤트의 공통 필드(타입, 사용자, 세션, 타임스탬프)를 정형 컬럼으로 분리하고, 이벤트별로 다른 메타데이터는 `properties JSONB` 컬럼에 저장합니다. 이렇게 하면 공통 필드에 인덱스를 걸어 집계 쿼리 성능을 확보하면서도, 이벤트 타입이 늘어날 때 스키마 변경 없이 확장할 수 있습니다. `created_at`을 별도로 두어 데이터 적재 시각과 이벤트 발생 시각(`timestamp`)을 구분했습니다.
+**Session-based generation, not uniform noise.** Events are produced per *session*, not
+independently, so the data follows a realistic funnel:
+
+- every session begins with **1–5 `page_view`s** (browsing),
+- with **20% probability** the user converts (`purchase`),
+- with **10% probability** an `error` occurs somewhere in the session,
+- timestamps advance a few seconds at a time within a session.
+
+This yields meaningful conversion funnels, per-session page-view distributions, and Top-N
+user analytics — none of which emerge from purely uniform-random events.
+
+**Peak-hour bias.** 70% of traffic is forced into business hours (09:00–18:00 KST, i.e.
+00:00–09:00 UTC); the rest is uniform over the day. The resulting peak share (~81%)
+reproduces a realistic daily traffic curve.
+
+**Fixed 50-user pool.** User ids are drawn from a fixed pool of 50 UUIDs so that
+repeat-visit and Top-user analytics are non-trivial. Fully random UUIDs would make every
+user a one-time visitor.
 
 ---
 
-## 구현하면서 고민한 점
+## Database Schema & Rationale
 
-**1. 단순 랜덤 vs 세션 기반 생성**
+```sql
+CREATE TABLE events (
+    id          SERIAL      PRIMARY KEY,
+    event_type  VARCHAR(50) NOT NULL,
+    user_id     VARCHAR(36) NOT NULL,
+    session_id  VARCHAR(36) NOT NULL,
+    timestamp   TIMESTAMPTZ NOT NULL,
+    properties  JSONB       NOT NULL,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+-- indexes on event_type, user_id, timestamp (the aggregation keys)
+```
 
-처음에는 이벤트를 단순 랜덤으로 생성하는 방식을 고려했습니다. 하지만 이 방식은 같은 `session_id`에 `purchase`만 5개 들어가는 등 비현실적인 데이터를 만듭니다. 실제 분석 시스템에서 의미 있는 패턴(전환율, 세션당 페이지뷰)을 시뮬레이션하려면 세션 단위 흐름이 필요하다고 판단했습니다.
+**Why PostgreSQL.** The workload is structured analytical aggregation (counts by type,
+per-user stats, hourly trends), which is exactly what a relational engine with SQL
+aggregation and indexing does best. PostgreSQL additionally offers `JSONB`, giving schema
+flexibility *and* indexable structured columns in one store.
 
-**2. generator의 종료 보장**
+**Structured columns + `JSONB`, not a single blob.** The fields common to every event
+(`event_type`, `user_id`, `session_id`, `timestamp`) are first-class indexed columns, while
+the per-type metadata lives in a `properties JSONB` column. This keeps aggregation queries
+fast (indexed columns) while allowing new event types without a schema migration — and it
+deliberately avoids the "store the whole event as one JSON blob" anti-pattern, which would
+make every aggregation a full scan with JSON extraction.
 
-`depends_on: condition: service_completed_successfully`가 동작하려면 generator가 exit 0으로 끝나야 합니다. DB 연결 재시도를 최대 5회(지수 백오프)로 제한하고, 실패 시 예외를 발생시켜 무한 대기 없이 명확하게 종료되도록 했습니다.
+**`created_at` vs `timestamp`.** `timestamp` is when the event *occurred*; `created_at` is
+when it was *ingested*. Separating them keeps event-time analytics correct even if ingestion
+is delayed.
 
-**3. 자격증명 관리**
-
-DB 비밀번호를 코드에 하드코딩하지 않고 환경변수로 주입합니다. `docker-compose.yml`의 `${VAR:-default}` 문법으로 `.env` 파일 없이도 기본값으로 즉시 실행 가능하게 했습니다.
-
-**4. properties 컬럼 설계**
-
-이벤트 타입마다 필드가 달라 별도 테이블로 나누면 JOIN 비용이 발생합니다. JSONB를 선택해 유연성과 쿼리 편의성을 동시에 확보했고, 이벤트 전체를 단일 JSON blob으로 저장하는 안티패턴은 의도적으로 피했습니다.
+The four analytics queries live in [`analysis/queries.sql`](analysis/queries.sql): event
+count by type, Top-10 users, hourly distribution, and error ratio.
 
 ---
 
-## Kubernetes (Optional A)
+## Reproducibility
 
-generator 앱을 위한 쿠버네티스 매니페스트입니다. 실제 배포용이 아닌 구조 설계 목적으로 작성했습니다.
+Set the `SEED` environment variable to make a run fully deterministic. Seeding covers
+`random`, Faker, **and** the UUID-derived ids (which are drawn from the seeded RNG rather
+than `os.urandom`), so the entire dataset — types, ids, and `properties` — is reproducible:
 
 ```bash
-# Secret 먼저 생성 (실제 배포 시)
+SEED=42 EVENT_COUNT=5000 docker compose up --build
+```
+
+This is what makes the **Results** table above reproducible and what keeps the test suite
+deterministic.
+
+---
+
+## Testing & CI
+
+The test suite is **hermetic** — it never needs the live PostgreSQL container. Generation
+logic is pure Python, and the analytics queries are validated against an in-memory SQLite
+database whose schema mirrors `db/init.sql`.
+
+```bash
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements-dev.txt
+ruff check .
+pytest
+```
+
+What is covered (`tests/`):
+
+- **`test_generator.py`** — property builders, session structure (1–5 page views, ordering,
+  at most one purchase/error), the aggregate funnel distribution (conversion ~20%, error
+  ~10%), peak-hour bias, and seed-based determinism.
+- **`test_load.py`** — the bulk-insert path: SQL/parameter binding via a fake cursor, plus a
+  SQLite round-trip that confirms every row and its `JSONB` payload survive load.
+- **`test_analytics.py`** — SQLite ports of the four `analysis/queries.sql` aggregations,
+  each cross-checked against an independent pure-Python computation (including the null-safe
+  empty-table case).
+
+[GitHub Actions CI](.github/workflows/ci.yml) runs `ruff` lint and the full `pytest` suite on
+Python 3.12 and 3.13 for every push and pull request.
+
+---
+
+## Engineering Decisions / Reflections
+
+- **Uniform-random vs session-based generation.** Independent random events produce
+  nonsensical data (e.g. five `purchase`s and no `page_view` in one session). Modeling
+  sessions as funnels is what makes conversion/retention analytics meaningful.
+- **Guaranteed clean termination.** `service_completed_successfully` only works if the
+  generator exits `0`. DB connection retries are capped (5 attempts, exponential backoff) and
+  raise on exhaustion, so the container fails fast instead of hanging forever.
+- **Credentials via env vars.** No passwords are hardcoded. `docker-compose.yml` uses
+  `${VAR:-default}` so the demo runs out of the box, while every value is overridable. The
+  defaults (`eventuser`/`eventpass`) are **non-production demo credentials**.
+- **`JSONB` for heterogeneous metadata.** Splitting per-type fields into separate tables
+  would force JOINs on every query; a single JSON blob would lose indexability. `JSONB`
+  balances flexibility and query performance.
+- **Testability by decoupling.** The generator imports `psycopg2` lazily, so its
+  probabilistic logic can be imported and unit-tested without a database driver installed.
+
+---
+
+## Kubernetes (Optional)
+
+Manifests for the `generator` app, written as a structural design exercise (not deployed):
+
+```bash
+# Create the Secret first (real deployments)
 kubectl create secret generic generator-secret \
   --from-literal=POSTGRES_PASSWORD=your_password
 
-# ConfigMap + Deployment 적용
 kubectl apply -f k8s/configmap.yaml
 kubectl apply -f k8s/deployment.yaml
 ```
 
-**왜 Pod이 아닌 Deployment인가?**
+**Why a Deployment, not a bare Pod?** A standalone Pod is gone permanently if its node fails
+or it is OOM-killed. A Deployment manages a ReplicaSet that keeps `replicas: 2` running,
+restarts failed Pods automatically, and supports rolling updates.
 
-단독 Pod은 노드 장애나 OOM으로 죽으면 영구히 사라집니다. Deployment는 `replicas: 2`를 항상 유지하도록 ReplicaSet을 관리하므로, Pod이 죽어도 자동으로 재시작되고 롤링 업데이트(무중단 배포)도 지원합니다.
-
-**왜 환경변수를 하드코딩하지 않고 ConfigMap인가?**
-
-DB 접속 정보를 이미지에 하드코딩하면 dev/staging/prod 환경마다 이미지를 새로 빌드해야 합니다. ConfigMap으로 분리하면 이미지는 그대로 두고 환경별 값만 교체할 수 있습니다. 단, 비밀번호처럼 민감한 값은 ConfigMap이 아닌 Secret에 저장해야 합니다 (ConfigMap은 평문 저장).
-
----
-
-## AWS Architecture (Optional B)
-
-다이어그램 파일: [`aws/architecture.drawio`](aws/architecture.drawio) — [diagrams.net](https://app.diagrams.net)에서 열 수 있습니다.
-
-### 전체 흐름
-
-```
-Client (Web/Mobile)
-    │  POST /events
-    ▼
-API Gateway (REST)
-    │  invoke
-    ▼
-Lambda: Validator        ← 스키마 검증, 이벤트 타입 확인
-    │  PutRecord
-    ▼
-Kinesis Data Streams     ← 트래픽 스파이크 버퍼링
-    │                 │
-    │ trigger          │ delivery stream
-    ▼                 ▼
-Lambda: Consumer     Kinesis Firehose → S3 (raw backup)
-    │  INSERT
-    ▼
-Aurora PostgreSQL (Serverless v2)
-    │  query
-    ▼
-QuickSight Dashboard     CloudWatch Alarms
-```
-
-### 서비스 선택 근거
-
-**이벤트 수집: API Gateway + Lambda**
-
-API Gateway는 HTTPS 엔드포인트, 인증(API Key/Cognito), 속도 제한(throttling)을 코드 없이 제공합니다. Lambda로 이벤트를 받아 유효성 검사 후 Kinesis에 넣는 구조로, 각 컴포넌트가 단일 책임을 갖습니다.
-
-Kinesis Data Streams 대신 Lambda → RDS 직접 연결도 가능하지만, 트래픽 스파이크 시 DB 커넥션이 고갈되는 문제가 생깁니다. Kinesis를 중간에 두면 이벤트를 버퍼링하고 소비 속도를 DB가 감당할 수 있는 수준으로 제어할 수 있습니다.
-
-**스토리지: Aurora PostgreSQL Serverless v2 + S3**
-
-| 선택지 | 채택 이유 |
-|--------|---------|
-| Aurora PostgreSQL | 로컬 PostgreSQL 스키마 그대로 마이그레이션 가능, 복잡한 집계 쿼리에 최적 |
-| Aurora Serverless v2 | 트래픽 없을 때 자동 스케일다운으로 비용 절감 |
-| S3 raw backup | Kinesis Firehose로 원본 이벤트를 Parquet으로 저장 → 추후 Athena로 대규모 분석 가능 |
-
-RDS 단독 대신 Aurora를 선택한 이유는 Multi-AZ 고가용성과 읽기 복제본(Read Replica) 생성이 간단하기 때문입니다. S3 + Athena만으로도 분석은 가능하지만, 실시간 대시보드 쿼리에는 RDS 계열이 적합합니다.
-
-**시각화: QuickSight + CloudWatch**
-
-QuickSight는 Aurora에 직접 연결해 SQL 기반 대시보드를 구성할 수 있고, 추가 서버 없이 IAM으로 접근 제어가 됩니다. CloudWatch는 Lambda 에러율·실행시간을 자동 수집하고 알람을 SNS로 연동할 수 있어 운영 모니터링에 활용합니다.
-
-**주요 트레이드오프**
-
-| 고려한 대안 | 미채택 이유 |
-|------------|-----------|
-| SQS 대신 Kinesis | 이벤트 순서 보장과 재처리(replay) 필요 시 Kinesis가 유리 |
-| S3+Athena만 사용 | 실시간 집계가 어렵고 쿼리 지연이 수 초 이상 발생 |
-| EC2 기반 서버 | 운영 부담이 크고, 이벤트 수집은 상태가 없는(stateless) 작업이라 Lambda가 더 적합 |
+**Why a ConfigMap, not hardcoded env?** Hardcoding DB connection info into the image forces a
+rebuild per environment (dev/staging/prod). A ConfigMap externalizes non-sensitive config so
+only the values change. Secrets (e.g. the password) belong in a `Secret`, never a ConfigMap
+(which stores plaintext).
 
 ---
 
-## 프로젝트 구조
+## AWS Reference Architecture (Optional)
+
+Diagram source: [`aws/architecture.drawio`](aws/architecture.drawio) (open at
+[diagrams.net](https://app.diagrams.net)).
+
+```mermaid
+flowchart TD
+    C["Client (Web / Mobile)"] -->|POST /events| AG["API Gateway (REST)"]
+    AG --> L1["Lambda: Validator<br/>schema + type checks"]
+    L1 -->|PutRecord| K["Kinesis Data Streams<br/>buffers traffic spikes"]
+    K --> L2["Lambda: Consumer"]
+    K --> FH["Kinesis Firehose"]
+    L2 -->|INSERT| AUR[("Aurora PostgreSQL<br/>Serverless v2")]
+    FH --> S3[("S3 raw backup<br/>(Parquet)")]
+    AUR --> QS["QuickSight Dashboard"]
+    L1 --> CW["CloudWatch Alarms"]
+    L2 --> CW
+```
+
+**Ingestion (API Gateway + Lambda + Kinesis).** API Gateway provides HTTPS, auth, and
+throttling with no code. A validator Lambda pushes events into Kinesis instead of writing to
+the DB directly, so traffic spikes are *buffered* rather than exhausting DB connections;
+Kinesis also preserves ordering and enables replay (versus SQS).
+
+**Storage (Aurora Serverless v2 + S3).** Aurora PostgreSQL migrates the local schema as-is
+and serves complex aggregations and real-time dashboards; Serverless v2 scales to near-zero
+when idle. Firehose lands raw events in S3 as Parquet for cheap, large-scale Athena analysis.
+
+**Visualization (QuickSight + CloudWatch).** QuickSight connects directly to Aurora for
+SQL-backed dashboards with IAM access control; CloudWatch tracks Lambda error rate/latency and
+fans out alarms via SNS.
+
+---
+
+## Project Structure
 
 ```
 .
 ├── db/
-│   └── init.sql          # 테이블 및 인덱스 생성
+│   └── init.sql              # table + indexes
 ├── generator/
-│   ├── main.py           # 세션 기반 이벤트 생성 및 DB 저장
+│   ├── main.py               # session-based event synthesis + bulk insert
 │   ├── requirements.txt
 │   └── Dockerfile
 ├── visualizer/
-│   ├── main.py           # 쿼리 실행 및 PNG 저장
+│   ├── main.py               # aggregation queries + PNG charts
 │   ├── requirements.txt
 │   └── Dockerfile
 ├── analysis/
-│   └── queries.sql       # 분석 쿼리 4종
-├── output/               # PNG 출력 디렉터리 (volume mount)
+│   └── queries.sql           # the 4 analytics queries
+├── tests/                    # hermetic pytest suite (no live Postgres)
+│   ├── conftest.py
+│   ├── test_generator.py
+│   ├── test_load.py
+│   └── test_analytics.py
 ├── k8s/
-│   ├── deployment.yaml   # generator Deployment (replicas=2, resource limits)
-│   └── configmap.yaml    # DB 접속 환경변수
+│   ├── deployment.yaml       # generator Deployment (replicas=2, resource limits)
+│   └── configmap.yaml        # DB connection config
 ├── aws/
-│   └── architecture.drawio  # AWS 아키텍처 다이어그램
+│   └── architecture.drawio   # AWS reference architecture
+├── output/                   # generated charts (volume mount; gitignored)
+├── .github/workflows/ci.yml  # lint + tests
+├── requirements-dev.txt      # lint/test deps
+├── pyproject.toml            # ruff + pytest config
 └── docker-compose.yml
 ```
