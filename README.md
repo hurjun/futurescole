@@ -82,6 +82,22 @@ Because the random stream is seeded, the **event counts and rates are fully repr
 only the absolute timestamps shift with the wall clock. They confirm the generator hits its
 design targets (~20% session conversion, ~10% session error, ~80% peak-hour traffic).
 
+![Seeded sample analytics: event-type distribution and hour-of-day traffic](docs/sample_results.png)
+
+> The figure above is generated from the **real seeded dataset** (not hand-drawn). The left
+> panel is the event-type distribution; the right panel buckets traffic by hour of day and the
+> shaded band marks the designed peak window (09:00–18:00 KST = 00:00–09:00 UTC), making the
+> ~80% peak-hour bias visible. Regenerate it with:
+>
+> ```bash
+> pip install matplotlib faker            # matplotlib only needed for this offline figure
+> SEED=42 EVENT_COUNT=5000 python analysis/make_figures.py   # writes docs/sample_results.png
+> ```
+>
+> Unlike the Dockerized `visualizer` service, this script needs no live PostgreSQL: it runs the
+> generator and the same aggregations against an in-memory SQLite DB (see
+> [`analysis/make_figures.py`](analysis/make_figures.py)).
+
 | Metric | Value |
 |--------|-------|
 | Total events | 5,003 |
