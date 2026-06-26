@@ -1,4 +1,12 @@
-"""Event generator: simulates realistic web-service traffic and persists to PostgreSQL."""
+"""Event generator: simulates realistic web-service traffic and persists to PostgreSQL.
+
+The event-synthesis logic in this module is intentionally free of any database
+dependency: ``psycopg2`` is imported lazily inside the persistence helpers only.
+This keeps the probabilistic generation functions importable (and unit-testable)
+without a live PostgreSQL instance or the native driver installed.
+"""
+
+from __future__ import annotations
 
 import json
 import logging
@@ -6,12 +14,14 @@ import os
 import random
 import time
 import uuid
-from datetime import datetime, timezone, timedelta
-from typing import Any, Callable
+from collections.abc import Callable
+from datetime import UTC, datetime, timedelta
+from typing import TYPE_CHECKING, Any
 
-import psycopg2
-import psycopg2.extensions
 from faker import Faker
+
+if TYPE_CHECKING:  # pragma: no cover - imported only for type checking
+    import psycopg2.extensions
 
 logging.basicConfig(
     level=logging.INFO,
@@ -41,6 +51,40 @@ EVENT_WINDOW_DAYS: int = 7
 # Events in this range are 4× more likely than off-peak hours.
 PEAK_UTC_START: int = 0   # 09 KST = 00 UTC
 PEAK_UTC_END: int = 9     # 18 KST = 09 UTC
+
+
+# ---------------------------------------------------------------------------
+# Reproducibility
+# ---------------------------------------------------------------------------
+
+def seed_all(seed: int) -> None:
+    """Seed every source of randomness for deterministic generation.
+
+    Seeding both the stdlib ``random`` module and Faker makes a run fully
+    reproducible, which is what the test-suite relies on and what lets a
+    reviewer regenerate the exact same dataset.
+
+    Args:
+        seed: Integer seed applied to ``random`` and Faker.
+    """
+    random.seed(seed)
+    Faker.seed(seed)
+    fake.seed_instance(seed)
+
+
+def _uuid() -> str:
+    """Return a UUID4 string drawn from the seeded ``random`` source.
+
+    ``uuid.uuid4()`` reads from ``os.urandom`` and so ignores ``random.seed``;
+    deriving the UUID from ``random.getrandbits`` keeps generated ids fully
+    reproducible when a seed is set.
+    """
+    return str(uuid.UUID(int=random.getrandbits(128), version=4))
+
+
+def _hex_token(n_bytes: int) -> str:
+    """Return a reproducible lowercase hex token of *n_bytes* bytes."""
+    return f"{random.getrandbits(n_bytes * 8):0{n_bytes * 2}x}"
 
 
 # ---------------------------------------------------------------------------
@@ -80,7 +124,7 @@ def _page_view_properties() -> dict[str, Any]:
 
 def _purchase_properties() -> dict[str, Any]:
     return {
-        "item_id": str(uuid.uuid4()),
+        "item_id": _uuid(),
         "amount_krw": random.randint(1_000, 500_000),
         "payment_method": random.choice(PAYMENT_METHODS),
     }
@@ -90,7 +134,7 @@ def _error_properties() -> dict[str, Any]:
     return {
         "error_code": random.choice(ERROR_CODES),
         "message": fake.sentence(),
-        "stack_trace_hash": uuid.uuid4().hex[:16],
+        "stack_trace_hash": _hex_token(8),
     }
 
 
@@ -128,7 +172,7 @@ def _generate_session(
     With 10 % probability an error occurs during the session.
     Event timestamps are spaced a few seconds apart within the session.
     """
-    session_id = str(uuid.uuid4())
+    session_id = _uuid()
     events: list[dict[str, Any]] = []
     ts = base_ts
 
@@ -145,13 +189,14 @@ def _generate_session(
 
     # Error phase: 10 % chance of error anywhere in the session
     if random.random() < 0.10:
-        error_ts = base_ts + timedelta(seconds=random.randint(0, int((ts - base_ts).total_seconds()) or 1))
+        span_seconds = int((ts - base_ts).total_seconds()) or 1
+        error_ts = base_ts + timedelta(seconds=random.randint(0, span_seconds))
         events.append(_make_event("error", user_id, session_id, error_ts))
 
     return events
 
 
-def generate_events(target_count: int) -> list[dict[str, Any]]:
+def generate_events(target_count: int, now: datetime | None = None) -> list[dict[str, Any]]:
     """Generate approximately *target_count* events via session simulation.
 
     Sessions are generated until the total event count reaches *target_count*.
@@ -160,12 +205,16 @@ def generate_events(target_count: int) -> list[dict[str, Any]]:
 
     Args:
         target_count: Approximate number of events to generate.
+        now: Reference "current time" the 7-day event window is measured back
+            from. Defaults to the wall clock; pass a fixed value (together with
+            ``seed_all``) for a fully reproducible dataset.
 
     Returns:
         List of event dicts ready for bulk-insert.
     """
-    now = datetime.now(timezone.utc)
-    user_pool = [str(uuid.uuid4()) for _ in range(USER_POOL_SIZE)]
+    if now is None:
+        now = datetime.now(UTC)
+    user_pool = [_uuid() for _ in range(USER_POOL_SIZE)]
 
     all_events: list[dict[str, Any]] = []
     while len(all_events) < target_count:
@@ -205,6 +254,8 @@ def get_db_connection(
     Raises:
         RuntimeError: If all retry attempts are exhausted.
     """
+    import psycopg2  # lazy import: only required when actually persisting
+
     dsn = _db_dsn()
     for attempt in range(1, retries + 1):
         try:
@@ -247,6 +298,11 @@ def insert_events(
 
 def main() -> None:
     """Generate session-based events and persist them to PostgreSQL."""
+    seed_env = os.environ.get("SEED")
+    if seed_env is not None:
+        seed_all(int(seed_env))
+        logger.info("Deterministic mode enabled (SEED=%s)", seed_env)
+
     target = int(os.environ.get("EVENT_COUNT", 1_000))
     logger.info("Target event count: %d", target)
 
